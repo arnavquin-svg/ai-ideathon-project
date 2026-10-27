@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Radar + SquadUp</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: { DEFAULT: '#0D1322', 900: '#0A0F1C', 800: '#141C2E', 700: '#1A2439', 600: '#24304A', 500: '#34415F' },
+          fog: { DEFAULT: '#E7EAF3', 300: '#B9C0D4', 400: '#8A93AD', 500: '#646D88' },
+          signal: { DEFAULT: '#F2B544', soft: '#F2B54422', deep: '#C98E22' },
+          squad: { DEFAULT: '#93A4FF', soft: '#93A4FF22', deep: '#6E80E8' },
+          role: { dev: '#93A4FF', design: '#FF8F86', domain: '#5CD3C1', present: '#C59CFF' },
+          ok: '#5CD3A0', warn: '#F2B544', bad: '#FF7A7A',
+        },
+        fontFamily: {
+          display: ['"Bricolage Grotesque"', 'system-ui', 'sans-serif'],
+          sans: ['"Instrument Sans"', 'system-ui', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #0D1322; font-feature-settings: "tnum" 1, "cv11" 1; }
+  .num { font-variant-numeric: tabular-nums; }
+  ::selection { background: #93A4FF55; }
+  :focus-visible { outline: 2px solid #93A4FF; outline-offset: 2px; border-radius: 6px; }
+  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #24304A; border-radius: 8px; }
+  .field { width: 100%; background: #0A0F1C; border: 1px solid #24304A; border-radius: 10px; padding: .6rem .75rem; color: #E7EAF3; font-size: .9rem; }
+  .field:focus { outline: none; border-color: #93A4FF; box-shadow: 0 0 0 3px #93A4FF26; }
+  .field::placeholder { color: #646D88; }
+  textarea.field { line-height: 1.55; resize: vertical; }
+  .btn { display: inline-flex; align-items: center; gap: .45rem; border-radius: 10px; padding: .55rem .9rem; font-weight: 600; font-size: .875rem; transition: background-color .15s, border-color .15s, color .15s, opacity .15s; white-space: nowrap; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-signal { background: #F2B544; color: #1B1405; } .btn-signal:hover:not(:disabled) { background: #F7C462; }
+  .btn-squad { background: #93A4FF; color: #0E1430; } .btn-squad:hover:not(:disabled) { background: #A9B7FF; }
+  .btn-ghost { border: 1px solid #24304A; color: #E7EAF3; } .btn-ghost:hover:not(:disabled) { border-color: #34415F; background: #1A2439; }
+  .btn-quiet { color: #B9C0D4; } .btn-quiet:hover:not(:disabled) { color: #E7EAF3; background: #1A2439; }
+  .btn-danger { border: 1px solid #FF7A7A44; color: #FF9E9E; } .btn-danger:hover:not(:disabled) { background: #FF7A7A14; }
+  .nav-item { display: flex; align-items: center; gap: .7rem; width: 100%; padding: .6rem .75rem; border-radius: 10px; color: #8A93AD; font-weight: 500; font-size: .92rem; }
+  .nav-item:hover { color: #E7EAF3; background: #141C2E; }
+  .nav-item[aria-current="page"] { color: #E7EAF3; background: #1A2439; }
+  .nav-item[aria-current="page"] .nav-dot { opacity: 1; }
+  .nav-dot { width: 6px; height: 6px; border-radius: 9px; margin-left: auto; opacity: 0; }
+  .panel { background: #141C2E; border: 1px solid #1F2940; border-radius: 16px; }
+  .chip { display: inline-flex; align-items: center; gap: .3rem; font-size: .75rem; padding: .18rem .55rem; border-radius: 999px; border: 1px solid #24304A; color: #B9C0D4; }
+  .tab { padding: .4rem .8rem; border-radius: 8px; font-size: .85rem; color: #8A93AD; font-weight: 500; }
+  .tab[aria-selected="true"] { background: #1A2439; color: #E7EAF3; }
+  dialog::backdrop { background: rgba(6, 9, 18, .72); backdrop-filter: blur(3px); }
+  dialog[open] { animation: rise .18s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  /* The radar scope: one orchestrated sweep when Radar runs, nothing else animates on its own. */
+  .sweep { transform-origin: 180px 180px; opacity: 0; }
+  .sweep.run { animation: sweep 1.6s cubic-bezier(.4,.1,.3,1) 1; }
+  @keyframes sweep { 0% { transform: rotate(0); opacity: .9; } 90% { opacity: .9; } 100% { transform: rotate(360deg); opacity: 0; } }
+  .blip { transition: r .15s, opacity .2s; cursor: pointer; }
+  .blip-group.dim { opacity: .25; }
+  .blip-group.revealed { animation: ping .5s ease-out both; }
+  @keyframes ping { 0% { opacity: 0; } 60% { opacity: 1; } 100% { opacity: 1; } }
+  .live-dot { box-shadow: 0 0 0 0 #5CD3A099; animation: live 2.4s infinite; }
+  @keyframes live { 0% { box-shadow: 0 0 0 0 #5CD3A066; } 70% { box-shadow: 0 0 0 7px #5CD3A000; } 100% { box-shadow: 0 0 0 0 #5CD3A000; } }
+  .role-opt:checked + span { border-color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); }
+  .role-opt:focus-visible + span { outline: 2px solid #93A4FF; outline-offset: 2px; }
+  .bar-fill { transition: width .5s cubic-bezier(.3,.7,.2,1); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .sweep { display: none; } }
+</style>
+</head>
+<body class="h-full font-sans text-fog antialiased">
+<div class="min-h-full lg:flex">
+
+  <!-- Rail -->
+  <aside class="lg:w-64 lg:shrink-0 lg:h-screen lg:sticky lg:top-0 border-b lg:border-b-0 lg:border-r border-ink-600/70 bg-ink-900 flex lg:flex-col">
+    <div class="flex items-center gap-3 px-5 py-4 lg:py-6">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <circle cx="17" cy="17" r="15.5" fill="none" stroke="#34415F" />
+        <circle cx="17" cy="17" r="9.5" fill="none" stroke="#34415F" />
+        <path d="M17 17 L17 1.5 A15.5 15.5 0 0 1 31.2 10.8 Z" fill="#F2B54433" />
+        <line x1="17" y1="17" x2="31.2" y2="10.8" stroke="#F2B544" stroke-width="1.6" stroke-linecap="round" />
+        <circle cx="24" cy="21" r="2.2" fill="#93A4FF" /><circle cx="12" cy="10" r="1.6" fill="#F2B544" />
+      </svg>
+      <div class="leading-tight">
+        <div class="font-display text-[1.08rem] font-semibold tracking-tight whitespace-nowrap">Radar + SquadUp</div>
+        <div class="text-xs text-fog-400 hidden lg:block">Event reach, without ads</div>
+      </div>
+    </div>
+
+    <nav class="flex lg:flex-col gap-1 px-3 overflow-x-auto scroll-thin items-center lg:items-stretch" aria-label="Sections">
+      <button class="nav-item" data-view="overview"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>Overview<span class="nav-dot bg-fog"></span></button>
+      <button class="nav-item" data-view="radar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6-6"/></svg>Radar<span class="nav-dot bg-signal"></span></button>
+      <button class="nav-item" data-view="outreach"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"/></svg>Outreach<span id="nav-pending" class="ml-auto text-xs num text-signal hidden"></span><span class="nav-dot bg-signal"></span></button>
+      <button class="nav-item" data-view="squads"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2" stroke-dasharray="3 2.5"/></svg>Squads<span class="nav-dot bg-squad"></span></button>
+    </nav>
+
+    <div class="hidden lg:block mt-auto p-4 space-y-3 text-xs text-fog-400">
+      <div class="rounded-xl border border-ink-600 p-3 leading-relaxed">
+        Nothing is sent automatically. Every message waits for your approval, and only community admins are contacted.
+      </div>
+      <label class="block">
+        <span class="block mb-1">API address</span>
+        <input id="api-base" class="field !py-1.5 !text-xs font-mono" spellcheck="false" />
+      </label>
+      <div class="flex items-center gap-2"><span id="conn-dot" class="w-2 h-2 rounded-full bg-fog-500"></span><span id="conn-label">Connecting…</span></div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 min-w-0">
+    <header class="sticky top-0 z-20 bg-ink/90 backdrop-blur border-b border-ink-600/70">
+      <div class="max-w-[1320px] mx-auto px-4 sm:px-8 py-3.5 flex flex-wrap items-center gap-3">
+        <label for="event-select" class="sr-only">Event</label>
+        <div class="relative min-w-0 flex-1 sm:flex-none sm:w-[340px]">
+          <select id="event-select" class="field appearance-none !pr-9 font-medium"></select>
+          <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-fog-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <div id="event-meta" class="text-sm text-fog-400 hidden md:block truncate"></div>
+        <div class="ml-auto flex items-center gap-2">
+          <span id="live" style="visibility:hidden" class="hidden sm:inline-flex items-center gap-2 text-xs text-fog-400 mr-1"><span class="w-1.5 h-1.5 rounded-full bg-ok live-dot"></span>Live</span>
+          <button id="btn-new-event" class="btn btn-ghost"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New event</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="max-w-[1320px] mx-auto px-4 sm:px-8 py-7 sm:py-9">
+
+      <!-- Empty state -->
+      <section id="view-empty" class="hidden">
+        <div class="panel p-10 max-w-xl">
+          <h1 class="font-display text-3xl font-semibold tracking-tight">Start with your event</h1>
+          <p class="mt-3 text-fog-300 leading-relaxed">Tell Radar what you're running and where. It finds the clubs and groups most likely to care, then drafts a message for each admin for you to review.</p>
+          <button class="btn btn-signal mt-6" data-open-new-event>Create your first event</button>
+        </div>
+      </section>
+
+      <!-- Overview -->
+      <section id="view-overview" class="hidden space-y-6" aria-labelledby="h-overview">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 id="h-overview" class="font-display text-[2rem] leading-tight font-semibold tracking-tight">How the first hundred arrive</h1>
+            <p class="text-fog-400 mt-1">From approved community messages to confirmed squads, updated every few seconds.</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3" id="kpis"></div>
+
+        <div class="grid lg:grid-cols-5 gap-4">
+          <div class="panel p-6 lg:col-span-3">
+            <div class="flex items-baseline justify-between gap-3">
+              <h2 class="font-display text-lg font-semibold">Funnel</h2>
+              <span class="text-xs text-fog-400" id="funnel-note"></span>
+            </div>
+            <ol id="funnel" class="mt-5 space-y-3.5"></ol>
+          </div>
+          <div class="panel p-6 lg:col-span-2">
+            <h2 class="font-display text-lg font-semibold">Where sign-ups come from</h2>
+            <ul id="sources" class="mt-4 space-y-3"></ul>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-5 gap-4">
+          <div class="panel p-6 lg:col-span-2">
+            <h2 class="font-display text-lg font-semibold">Skill mix</h2>
+            <p class="text-sm text-fog-400 mt-1">Balanced squads need all four roles in roughly equal numbers.</p>
+            <ul id="roles" class="mt-5 space-y-3"></ul>
+          </div>
+          <div class="panel p-6 lg:col-span-3">
+            <h2 class="font-display text-lg font-semibold">Latest registrations</h2>
+            <ul id="recent" class="mt-3 divide-y divide-ink-600/60"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Radar -->
+      <section id="view-radar" class="hidden space-y-6" aria-labelledby="h-radar">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="max-w-2xl">
+            <h1 id="h-radar" class="font-display text-[2rem] leading-tight font-semibold tracking-tight">Who's most likely to care</h1>
+            <p class="text-fog-400 mt-1">Radar scores every group in the directory against your event. Closer to the centre means a better fit.</p>
+          </div>
+          <div class="flex gap-2">
+            <button id="btn-add-community" class="btn btn-ghost">Add a group</button>
+            <button id="btn-run-radar" class="btn btn-signal"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><path d="M12 12l6-6"/></svg>Run Radar and draft messages</button>
+          </div>
+        </div>
+
+        <div id="profile" class="panel px-5 py-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm"></div>
+
+        <div class="grid xl:grid-cols-[400px_1fr] gap-4 items-start">
+          <div class="panel p-5 xl:sticky xl:top-24">
+            <svg id="scope" viewBox="0 0 360 360" class="w-full max-w-[360px] mx-auto block" role="img" aria-label="Radar map of ranked communities"></svg>
+            <div class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-fog-400 justify-center">
+              <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-signal"></span>Same city</span>
+              <span class="inline-flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-squad"></span>Elsewhere or online</span>
+              <span>Larger dot, larger group</span>
+            </div>
+            <p id="formula" class="mt-4 text-xs text-fog-500 text-center"></p>
+          </div>
+          <div class="panel overflow-hidden">
+            <div class="px-5 py-4 border-b border-ink-600/60 flex items-baseline justify-between">
+              <h2 class="font-display text-lg font-semibold">Ranked groups</h2>
+              <span id="scanned" class="text-xs text-fog-400"></span>
+            </div>
+            <ol id="ranking" class="divide-y divide-ink-600/50"></ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- Outreach -->
+      <section id="view-outreach" class="hidden space-y-6" aria-labelledby="h-outreach">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="max-w-2xl">
+            <h1 id="h-outreach" class="font-display text-[2rem] leading-tight font-semibold tracking-tight">Review before anything goes out</h1>
+            <p class="text-fog-400 mt-1">Each message goes to one group admin, who decides whether to forward it. Links unlock only after you approve.</p>
+          </div>
+          <div role="tablist" aria-label="Filter messages" class="flex gap-1 p-1 rounded-xl border border-ink-600" id="outreach-tabs">
+            <button role="tab" class="tab" data-filter="pending" aria-selected="true">Waiting <span class="num" data-count="pending"></span></button>
+            <button role="tab" class="tab" data-filter="approved" aria-selected="false">Approved <span class="num" data-count="approved"></span></button>
+            <button role="tab" class="tab" data-filter="rejected" aria-selected="false">Skipped <span class="num" data-count="rejected"></span></button>
+            <button role="tab" class="tab" data-filter="all" aria-selected="false">All</button>
+          </div>
+        </div>
+
+        <div class="grid lg:grid-cols-[340px_1fr] gap-4 items-start">
+          <ul id="outreach-list" class="panel p-2 space-y-1 max-h-[70vh] overflow-y-auto scroll-thin"></ul>
+          <div id="outreach-editor" class="panel p-6"></div>
+        </div>
+      </section>
+
+      <!-- Squads -->
+      <section id="view-squads" class="hidden space-y-6" aria-labelledby="h-squads">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="max-w-2xl">
+            <h1 id="h-squads" class="font-display text-[2rem] leading-tight font-semibold tracking-tight">Squads forming</h1>
+            <p class="text-fog-400 mt-1">Solo sign-ups are seated where their skill is missing. Friends invited by a teammate get first claim on that team's open seats.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="btn-walkin" class="btn btn-ghost">Add a walk-in</button>
+            <button id="btn-simulate" class="btn btn-squad" title="Creates clearly labelled sample sign-ups through your approved links">Simulate 12 sample sign-ups</button>
+          </div>
+        </div>
+
+        <div id="squad-summary" class="flex flex-wrap gap-x-8 gap-y-2 text-sm"></div>
+        <div id="teams" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- New event dialog -->
+<dialog id="dlg-event" class="bg-ink-800 text-fog rounded-2xl border border-ink-600 p-0 w-[min(640px,calc(100vw-2rem))]">
+  <form id="form-event" method="dialog" class="p-6 sm:p-7 space-y-4">
+    <div>
+      <h2 class="font-display text-2xl font-semibold tracking-tight">New event</h2>
+      <p class="text-sm text-fog-400 mt-1">Radar only uses what you write here. Nothing is invented in the messages it drafts.</p>
+    </div>
+    <label class="block"><span class="text-sm text-fog-300">Event name</span>
+      <input name="name" required minlength="3" maxlength="120" class="field mt-1.5" placeholder="Sonipat Robotics Olympiad" /></label>
+    <div class="grid sm:grid-cols-2 gap-4">
+      <label class="block"><span class="text-sm text-fog-300">City</span>
+        <input name="city" required minlength="2" maxlength="60" class="field mt-1.5" placeholder="Pune" /></label>
+      <label class="block"><span class="text-sm text-fog-300">Date</span>
+        <input name="start_date" type="date" class="field mt-1.5" /></label>
+    </div>
+    <label class="block"><span class="text-sm text-fog-300">Venue <span class="text-fog-500">(optional)</span></span>
+      <input name="venue" maxlength="160" class="field mt-1.5" placeholder="Main auditorium, XYZ College" /></label>
+    <label class="block"><span class="text-sm text-fog-300">What happens at the event</span>
+      <textarea name="description" rows="3" maxlength="2000" class="field mt-1.5" placeholder="A 24-hour beginner-friendly hackathon where students build tools for local problems. Mentors on site."></textarea></label>
+    <fieldset>
+      <legend class="text-sm text-fog-300">Topics</legend>
+      <div id="tag-picker" class="mt-2 flex flex-wrap gap-2"></div>
+      <input name="extra_tags" class="field mt-2" placeholder="Other topics, separated by commas" />
+    </fieldset>
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" class="btn btn-quiet" data-close>Cancel</button>
+      <button type="submit" class="btn btn-signal" id="btn-create-event">Create and run Radar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Add community dialog -->
+<dialog id="dlg-community" class="bg-ink-800 text-fog rounded-2xl border border-ink-600 p-0 w-[min(560px,calc(100vw-2rem))]">
+  <form id="form-community" method="dialog" class="p-6 sm:p-7 space-y-4">
+    <div>
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Add a group you know</h2>
+      <p class="text-sm text-fog-400 mt-1">A club, class group or meetup whose admin you could reach. It joins the directory for every future event.</p>
+    </div>
+    <label class="block"><span class="text-sm text-fog-300">Group name</span>
+      <input name="name" required minlength="3" maxlength="120" class="field mt-1.5" placeholder="XYZ College Coding Club" /></label>
+    <div class="grid sm:grid-cols-2 gap-4">
+      <label class="block"><span class="text-sm text-fog-300">City</span>
+        <input name="city" required class="field mt-1.5" placeholder="Pune, or Online" /></label>
+      <label class="block"><span class="text-sm text-fog-300">Where they talk</span>
+        <select name="platform" class="field mt-1.5"><option value="whatsapp">WhatsApp</option><option value="telegram">Telegram</option><option value="instagram">Instagram</option><option value="discord">Discord</option><option value="other">Other</option></select></label>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-4">
+      <label class="block"><span class="text-sm text-fog-300">Approximate members</span>
+        <input name="size" type="number" min="1" value="150" class="field mt-1.5" /></label>
+      <label class="block"><span class="text-sm text-fog-300">Admin's first name <span class="text-fog-500">(optional)</span></span>
+        <input name="admin_name" maxlength="60" class="field mt-1.5" /></label>
+    </div>
+    <label class="block"><span class="text-sm text-fog-300">Topics they care about</span>
+      <input name="tags" class="field mt-1.5" placeholder="ai, hackathon, beginner" /></label>
+    <fieldset><legend class="text-sm text-fog-300">Languages the admin reads</legend>
+      <div class="mt-2 flex gap-4 text-sm">
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="lang" value="en" checked class="accent-[#93A4FF]" />English</label>
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="lang" value="hi" class="accent-[#93A4FF]" />Hindi</label>
+        <label class="inline-flex items-center gap-2"><input type="checkbox" name="lang" value="mr" class="accent-[#93A4FF]" />Marathi</label>
+      </div></fieldset>
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" class="btn btn-quiet" data-close>Cancel</button>
+      <button type="submit" class="btn btn-signal">Add group</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Walk-in dialog -->
+<dialog id="dlg-walkin" class="bg-ink-800 text-fog rounded-2xl border border-ink-600 p-0 w-[min(480px,calc(100vw-2rem))]">
+  <form id="form-walkin" method="dialog" class="p-6 sm:p-7 space-y-4">
+    <div>
+      <h2 class="font-display text-2xl font-semibold tracking-tight">Add a walk-in</h2>
+      <p class="text-sm text-fog-400 mt-1">For someone registering in person. They're seated by the same balancing rules as the bot.</p>
+    </div>
+    <label class="block"><span class="text-sm text-fog-300">Name</span>
+      <input name="name" required maxlength="80" class="field mt-1.5" /></label>
+    <fieldset><legend class="text-sm text-fog-300">Role</legend>
+      <div id="walkin-roles" class="mt-2 grid grid-cols-2 gap-2"></div></fieldset>
+    <label class="block"><span class="text-sm text-fog-300">Hackathon experience</span>
+      <select name="experience" class="field mt-1.5"><option value="first_time">This is their first</option><option value="some">1–2 before</option><option value="veteran">3 or more</option></select></label>
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" class="btn btn-quiet" data-close>Cancel</button>
+      <button type="submit" class="btn btn-squad">Seat them</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toasts" class="fixed bottom-5 right-5 z-50 space-y-2 w-[min(360px,calc(100vw-2.5rem))]" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------------------------------------------------------------- config
+  const ROLES = [
+    { id: 'developer', label: 'Developer', color: '#93A4FF', glyph: '</>' },
+    { id: 'designer', label: 'Designer', color: '#FF8F86', glyph: '◐' },
+    { id: 'domain_expert', label: 'Domain expert', color: '#5CD3C1', glyph: '✦' },
+    { id: 'presenter', label: 'Presenter', color: '#C59CFF', glyph: '◉' },
+  ];
+  const ROLE = Object.fromEntries(ROLES.map(r => [r.id, r]));
+  const THEMES = [['ai','AI'],['hackathon','Hackathons'],['beginner','Beginner-friendly'],['robotics','Robotics'],['web','Web dev'],['data','Data'],['design','Design'],['science','Science'],['startup','Startups'],['cultural','Culture'],['social-impact','Social impact'],['gaming','Gaming'],['cybersecurity','Cybersecurity']];
+  const PLATFORM = { whatsapp: 'WhatsApp', telegram: 'Telegram', instagram: 'Instagram', discord: 'Discord', other: 'Other', referral: 'Invites', direct: 'Direct' };
+  const POLL_MS = 5000;
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
+  };
+  const params = new URLSearchParams(location.search);
+  const defaultApi = location.protocol.startsWith('http') ? location.origin : 'http://localhost:8000';
+  let API = (params.get('api') || store.get('radar.api') || defaultApi).replace(/\/$/, '');
+
+  const state = {
+    view: store.get('radar.view') || 'overview',
+    events: [], eventId: null, event: null,
+    ranking: null, outreach: [], filter: 'pending', selectedOutreach: null,
+    stats: null, teams: [], highlight: null, online: false,
+  };
+
+  // ---------------------------------------------------------------- utils
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (n) => Number(n || 0).toLocaleString('en-IN');
+  const pct = (n) => `${Math.round((n || 0) * 100)}%`;
+  const fmtDate = (iso) => { if (!iso) return ''; const d = new Date(iso.slice(0, 10) + 'T00:00:00'); return isNaN(d) ? iso : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); };
+  const ago = (ts) => { const d = new Date(ts.replace(' ', 'T') + 'Z'); const s = Math.max(0, (Date.now() - d) / 1000); if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s / 60)} min ago`; if (s < 86400) return `${Math.floor(s / 3600)} h ago`; return `${Math.floor(s / 86400)} d ago`; };
+
+  async function api(path, opts = {}) {
+    const init = { method: opts.method || 'GET', headers: {} };
+    if (opts.body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.body); }
+    let res;
+    try { res = await fetch(API + path, init); }
+    catch { setOnline(false); throw new Error(`Can't reach the API at ${API}. Start it with: uvicorn app.main:app --reload`); }
+    setOnline(true);
+    if (res.status === 204) return null;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = Array.isArray(data.detail) ? data.detail.map(d => `${d.loc?.slice(-1)[0]}: ${d.msg}`).join('; ') : data.detail;
+      throw new Error(detail || `Request failed (${res.status})`);
+    }
+    return data;
+  }
+
+  function toast(message, kind = 'ok') {
+    const color = { ok: '#5CD3A0', error: '#FF7A7A', info: '#93A4FF' }[kind];
+    const el = document.createElement('div');
+    el.className = 'panel px-4 py-3 text-sm flex gap-3 items-start shadow-2xl';
+    el.style.animation = 'rise .18s ease-out';
+    el.innerHTML = `<span class="mt-1.5 w-2 h-2 rounded-full shrink-0" style="background:${color}"></span><span class="leading-relaxed">${esc(message)}</span>`;
+    $('#toasts').appendChild(el);
+    setTimeout(() => el.remove(), kind === 'error' ? 6500 : 3200);
+  }
+  const fail = (e) => toast(e.message || String(e), 'error');
+
+  async function copy(text, what) {
+    try { await navigator.clipboard.writeText(text); toast(`${what} copied`); }
+    catch {
+      const ta = Object.assign(document.createElement('textarea'), { value: text });
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast(`${what} copied`); } catch { toast('Copy failed. Select the text and copy it manually.', 'error'); }
+      ta.remove();
+    }
+  }
+
+  function setOnline(on) {
+    state.online = on;
+    $('#conn-dot').className = `w-2 h-2 rounded-full ${on ? 'bg-ok' : 'bg-bad'}`;
+    $('#conn-label').textContent = on ? 'Connected' : 'API unreachable';
+    $('#live').style.visibility = on ? 'visible' : 'hidden';
+  }
+
+  function busy(btn, on, label) {
+    if (!btn) return;
+    if (on) { btn.dataset.label = btn.innerHTML; btn.disabled = true; btn.textContent = label || 'Working…'; }
+    else { btn.disabled = false; if (btn.dataset.label) btn.innerHTML = btn.dataset.label; }
+  }
+
+  // ---------------------------------------------------------------- navigation
+  function show(view) {
+    if (!state.eventId && view !== 'empty') view = 'empty';
+    state.view = view === 'empty' ? state.view : view;
+    if (view !== 'empty') store.set('radar.view', view);
+    $$('section[id^="view-"]').forEach(s => s.classList.toggle('hidden', s.id !== `view-${view}`));
+    $$('.nav-item').forEach(b => b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false'));
+    refreshView(view);
+  }
+
+  function refreshView(view = state.view) {
+    if (!state.eventId) return;
+    if (view === 'overview') loadStats().catch(fail);
+    if (view === 'radar') loadRanking().catch(fail);
+    if (view === 'outreach') loadOutreach().catch(fail);
+    if (view === 'squads') Promise.all([loadTeams(), loadStats(true)]).catch(fail);
+  }
+
+  // ---------------------------------------------------------------- events
+  async function loadEvents(selectId) {
+    state.events = await api('/api/events');
+    const sel = $('#event-select');
+    sel.innerHTML = state.events.map(e => `<option value="${e.id}">${esc(e.name)} — ${esc(e.city)}</option>`).join('');
+    if (!state.events.length) { state.eventId = null; sel.innerHTML = '<option>No events yet</option>'; $('#event-meta').textContent = ''; show('empty'); return; }
+    const saved = Number(store.get('radar.event'));
+    const id = selectId || (state.events.some(e => e.id === saved) ? saved : state.events[0].id);
+    await selectEvent(id);
+  }
+
+  async function selectEvent(id) {
+    state.eventId = Number(id);
+    store.set('radar.event', String(id));
+    $('#event-select').value = String(id);
+    state.event = await api(`/api/events/${id}`);
+    state.ranking = null; state.selectedOutreach = null; state.highlight = null;
+    const e = state.event;
+    $('#event-meta').textContent = [fmtDate(e.start_date), e.venue].filter(Boolean).join(', ');
+    show(state.view);
+    updatePendingBadge();
+  }
+
+  async function updatePendingBadge() {
+    if (!state.eventId) return;
+    try {
+      const list = await api(`/api/events/${state.eventId}/outreach?status=pending`);
+      const b = $('#nav-pending');
+      b.textContent = list.length; b.classList.toggle('hidden', !list.length);
+    } catch { /* badge is best-effort */ }
+  }
+
+  // ---------------------------------------------------------------- overview
+  async function loadStats(quiet) {
+    state.stats = await api(`/api/events/${state.eventId}/stats`);
+    if (state.view === 'overview') renderOverview();
+    if (state.view === 'squads') renderSquadSummary();
+    if (!quiet) updatePendingBadge();
+  }
+
+  function kpi(label, value, sub, color) {
+    return `<div class="panel px-5 py-4">
+      <div class="text-sm text-fog-400">${esc(label)}</div>
+      <div class="font-display text-[2.1rem] leading-none font-semibold num mt-2" style="color:${color || '#E7EAF3'}">${value}</div>
+      <div class="text-xs text-fog-400 mt-2">${sub}</div></div>`;
+  }
+
+  function renderOverview() {
+    const s = state.stats; const k = s.kpis;
+    $('#kpis').innerHTML = [
+      kpi('Registered', fmt(k.registrations), `${fmt(k.withdrawn)} freed their seat`),
+      kpi('Confirmed attendance', fmt(k.confirmed), `${pct(k.confirmation_rate)} of registrations`, '#5CD3A0'),
+      kpi('Full squads', `${fmt(k.full_teams)}<span class="text-fog-500 text-xl">/${fmt(k.teams)}</span>`, `${fmt(k.open_seats)} open seats`, '#93A4FF'),
+      kpi('Brought by teammates', fmt(k.via_referral), `${k.viral_coefficient} invites per community sign-up`, '#F2B544'),
+    ].join('');
+
+    const max = Math.max(1, ...s.funnel.map(f => f.value));
+    const colors = ['#34415F', '#F2B544', '#F2B544', '#93A4FF', '#5CD3A0'];
+    const [drafts, approvedN, clicks, regs] = s.funnel.map(f => f.value);
+    const notes = [
+      '',
+      drafts ? `${Math.round(approvedN / drafts * 100)}% of drafts` : '',
+      approvedN ? `${(clicks / approvedN).toFixed(1)} per link` : '',
+      clicks ? `${Math.round(regs / clicks * 100)}% of clicks` : '',
+      regs ? `${Math.round(s.funnel[4].value / regs * 100)}% of registered` : '',
+    ];
+    $('#funnel').innerHTML = s.funnel.map((f, i) => `<li class="grid grid-cols-[96px_1fr_84px] sm:grid-cols-[130px_1fr_110px] items-center gap-3 sm:gap-4">
+        <span class="text-sm text-fog-300">${esc(f.stage)}</span>
+        <span class="h-7 rounded-md bg-ink-700 overflow-hidden"><span class="bar-fill block h-full rounded-md" style="width:${Math.max(f.value ? 2 : 0, f.value / max * 100)}%;background:${colors[i]}"></span></span>
+        <span class="text-right"><span class="font-display font-semibold num">${fmt(f.value)}</span><span class="block text-[11px] text-fog-500">${notes[i]}</span></span></li>`).join('');
+    $('#funnel-note').textContent = k.synthetic ? `${fmt(k.synthetic)} sample sign-ups included` : '';
+
+    const srcMax = Math.max(1, ...s.by_source.map(x => x.registrations));
+    $('#sources').innerHTML = s.by_source.length ? s.by_source.slice(0, 8).map(x => {
+      const color = x.platform === 'referral' ? '#F2B544' : x.platform === 'direct' ? '#646D88' : '#93A4FF';
+      const clicks = x.clicks != null ? `${fmt(x.clicks)} clicks` : PLATFORM[x.platform] || '';
+      return `<li><div class="flex justify-between gap-3 text-sm"><span class="truncate">${esc(x.label)}</span><span class="num font-semibold shrink-0">${fmt(x.registrations)}</span></div>
+        <div class="mt-1.5 flex items-center gap-3"><span class="flex-1 h-1.5 rounded bg-ink-700 overflow-hidden"><span class="bar-fill block h-full" style="width:${x.registrations / srcMax * 100}%;background:${color}"></span></span><span class="text-[11px] text-fog-500 w-16 text-right">${esc(clicks)}</span></div></li>`;
+    }).join('') : `<li class="text-sm text-fog-400 leading-relaxed">No approved links yet. Approve a message in Outreach and share it with the admin; sign-ups through it will show up here.</li>`;
+
+    const total = Object.values(s.roles).reduce((a, b) => a + b, 0);
+    $('#roles').innerHTML = ROLES.map(r => {
+      const n = s.roles[r.id] || 0; const share = total ? n / total : 0;
+      return `<li class="grid grid-cols-[120px_1fr_48px] items-center gap-3 text-sm">
+        <span class="inline-flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-sm" style="background:${r.color}"></span>${r.label}</span>
+        <span class="h-2 rounded bg-ink-700 overflow-hidden"><span class="bar-fill block h-full" style="width:${share * 100}%;background:${r.color}"></span></span>
+        <span class="text-right num text-fog-300">${fmt(n)}</span></li>`;
+    }).join('');
+
+    $('#recent').innerHTML = s.recent.length ? s.recent.map(p => {
+      const r = ROLE[p.role];
+      const src = p.via_referral ? 'invited by a teammate' : p.source ? `via ${esc(p.source)}` : 'direct';
+      const status = p.status === 'confirmed' ? '<span class="text-ok text-xs">Confirmed</span>' : p.status === 'withdrawn' ? '<span class="text-fog-500 text-xs">Freed seat</span>' : '<span class="text-fog-400 text-xs">Registered</span>';
+      return `<li class="py-2.5 flex items-center gap-3">
+        <span class="w-8 h-8 rounded-full grid place-items-center text-xs font-semibold shrink-0" style="background:${r.color}22;color:${r.color}">${esc(p.first_name.slice(0, 1))}</span>
+        <span class="min-w-0 flex-1"><span class="block text-sm truncate">${esc(p.name)} <span class="text-fog-400">· ${r.label}${p.team_number ? `, Team ${p.team_number}` : ''}</span></span>
+        <span class="block text-xs text-fog-500 truncate">${src}, ${ago(p.created_at)}</span></span>${status}</li>`;
+    }).join('') : `<li class="py-3 text-sm text-fog-400">Nobody yet. Once an approved link is shared, people register in Telegram and appear here.</li>`;
+  }
+
+  // ---------------------------------------------------------------- radar
+  async function loadRanking() {
+    const data = await api(`/api/events/${state.eventId}/radar`);
+    state.ranking = data;
+    renderRadar(false);
+  }
+
+  async function runRadar() {
+    const btn = $('#btn-run-radar');
+    busy(btn, true, 'Scanning…');
+    try {
+      const data = await api(`/api/events/${state.eventId}/radar/run`, { method: 'POST', body: { limit: 12 } });
+      state.ranking = data;
+      if (state.view === 'radar') renderRadar(true);
+      toast(`${data.drafts_created} new messages drafted for review${data.drafts_refreshed ? `, ${data.drafts_refreshed} refreshed` : ''}.`);
+      updatePendingBadge();
+    } catch (e) { fail(e); } finally { busy(btn, false); }
+  }
+
+  function renderRadar(animate) {
+    const d = state.ranking; const p = d.profile;
+    const langNames = { en: 'English', hi: 'Hindi', mr: 'Marathi' };
+    $('#profile').innerHTML = `
+      <div><span class="text-fog-400">Topics</span><div class="mt-1 flex flex-wrap gap-1.5">${p.theme_labels.map(t => `<span class="chip">${esc(t)}</span>`).join('') || '<span class="text-fog-500">None detected. Add topics to the event.</span>'}</div></div>
+      <div><span class="text-fog-400">Level</span><div class="mt-1 font-medium">${esc(p.skill_level[0].toUpperCase() + p.skill_level.slice(1))}</div></div>
+      <div><span class="text-fog-400">City</span><div class="mt-1 font-medium">${esc(p.city)}</div></div>
+      <div><span class="text-fog-400">Draft languages</span><div class="mt-1 font-medium">${p.languages.map(l => langNames[l]).join(', ')}</div></div>`;
+    $('#scanned').textContent = `${d.ranking.length} of ${d.scanned} groups qualify`;
+    $('#formula').textContent = d.formula || 'Score = 22 × topic overlaps + 25 (if local) + size factor (≤15)';
+    renderScope(d.ranking, animate);
+    renderRankingList(d.ranking);
+  }
+
+  function renderScope(ranking, animate) {
+    const C = 180, R = 160;
+    const scores = ranking.map(r => r.score);
+    const hi = scores.length ? Math.max(...scores) : 1, lo = scores.length ? Math.min(...scores) : 0;
+    const rings = [R, R * .72, R * .44, R * .18].map(r => `<circle cx="${C}" cy="${C}" r="${r}" fill="none" stroke="#24304A" />`).join('');
+    const spokes = [0, 45, 90, 135].map(a => { const rad = a * Math.PI / 180; return `<line x1="${C - R * Math.cos(rad)}" y1="${C - R * Math.sin(rad)}" x2="${C + R * Math.cos(rad)}" y2="${C + R * Math.sin(rad)}" stroke="#1C2539" />`; }).join('');
+    const blips = ranking.map((r, i) => {
+      // Best fit sits near the centre, weakest qualifying group near the rim.
+      const rel = hi === lo ? 1 : (r.score - lo) / (hi - lo);
+      const dist = 30 + (1 - rel) * (R - 48);
+      const ang = (i * 137.508 + 18) * Math.PI / 180;
+      const x = C + dist * Math.cos(ang), y = C + dist * Math.sin(ang);
+      const size = 3.5 + (r.size_factor / 15) * 5.5;
+      const color = r.is_local ? '#F2B544' : '#93A4FF';
+      const delay = animate ? (((ang * 180 / Math.PI) % 360 + 360) % 360) / 360 * 1.45 : 0;
+      return `<g class="blip-group ${animate ? 'revealed' : ''}" data-cid="${r.community.id}" style="animation-delay:${delay}s" tabindex="0" role="button" aria-label="${esc(r.community.name)}, score ${r.score}">
+        <title>${esc(r.community.name)} — ${r.score}</title>
+        <circle cx="${x}" cy="${y}" r="${size + 5}" fill="${color}" opacity=".12" />
+        <circle class="blip" cx="${x}" cy="${y}" r="${size}" fill="${color}" />
+        ${i < 3 ? `<text x="${x}" y="${y - size - 6}" text-anchor="middle" font-size="10" fill="#B9C0D4" font-family="Instrument Sans">${i + 1}</text>` : ''}</g>`;
+    }).join('');
+    $('#scope').innerHTML = `
+      <defs><linearGradient id="sw" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#F2B544" stop-opacity="0"/><stop offset="1" stop-color="#F2B544" stop-opacity=".35"/></linearGradient></defs>
+      <circle cx="${C}" cy="${C}" r="${R}" fill="#0A0F1C" />${spokes}${rings}
+      <path class="sweep ${animate ? 'run' : ''}" d="M${C} ${C} L${C + R} ${C} A${R} ${R} 0 0 0 ${C + R * Math.cos(-0.6)} ${C + R * Math.sin(-0.6)} Z" fill="url(#sw)" />
+      <circle cx="${C}" cy="${C}" r="4" fill="#E7EAF3" />
+      ${ranking.length ? blips : `<text x="${C}" y="${C + 30}" text-anchor="middle" fill="#8A93AD" font-size="12" font-family="Instrument Sans">No matching groups yet</text>`}`;
+    $$('#scope .blip-group').forEach(g => {
+      const pick = () => highlightCommunity(Number(g.dataset.cid), true);
+      g.addEventListener('click', pick);
+      g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    });
+  }
+
+  function highlightCommunity(cid, scroll) {
+    state.highlight = state.highlight === cid ? null : cid;
+    $$('#scope .blip-group').forEach(g => g.classList.toggle('dim', state.highlight !== null && Number(g.dataset.cid) !== state.highlight));
+    $$('#ranking > li').forEach(li => li.classList.toggle('bg-ink-700', Number(li.dataset.cid) === state.highlight));
+    if (scroll && state.highlight) $(`#ranking > li[data-cid="${cid}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function renderRankingList(ranking) {
+    const top = Math.max(1, ...ranking.map(r => r.score));
+    $('#ranking').innerHTML = ranking.length ? ranking.map(r => {
+      const c = r.community;
+      return `<li data-cid="${c.id}" class="px-5 py-4 grid grid-cols-[28px_1fr_auto] gap-x-4 gap-y-2 cursor-pointer hover:bg-ink-700/60 transition-colors">
+        <span class="font-display text-lg font-semibold text-fog-500 num">${r.rank}</span>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span class="font-semibold">${esc(c.name)}</span>
+            <span class="text-xs text-fog-400">${esc(PLATFORM[c.platform] || c.platform)}, ${fmt(c.size)} members</span>
+            ${c.discovered_via === 'squadup_referral' ? '<span class="chip !border-signal/40 !text-signal">Found through SquadUp</span>' : ''}
+          </div>
+          <p class="text-sm text-fog-400 mt-1">${esc(r.rationale)}</p>
+        </div>
+        <div class="text-right"><div class="font-display text-xl font-semibold num ${r.is_local ? 'text-signal' : 'text-squad'}">${Math.round(r.score)}</div>
+          <div class="w-20 h-1 rounded bg-ink-600 mt-1.5 overflow-hidden ml-auto"><div class="h-full ${r.is_local ? 'bg-signal' : 'bg-squad'}" style="width:${r.score / top * 100}%"></div></div></div>
+      </li>`;
+    }).join('') : `<li class="px-5 py-8 text-sm text-fog-400">No group shares a topic with this event or sits in ${esc(state.event.city)}. Add topics to the event, or add groups you know.</li>`;
+    $$('#ranking > li[data-cid]').forEach(li => li.addEventListener('click', () => highlightCommunity(Number(li.dataset.cid), false)));
+  }
+
+  // ---------------------------------------------------------------- outreach
+  async function loadOutreach() {
+    state.outreach = await api(`/api/events/${state.eventId}/outreach`);
+    renderOutreach();
+  }
+
+  function filtered() { return state.filter === 'all' ? state.outreach : state.outreach.filter(o => o.status === state.filter); }
+
+  function renderOutreach() {
+    const counts = { pending: 0, approved: 0, rejected: 0 };
+    state.outreach.forEach(o => counts[o.status]++);
+    $$('[data-count]').forEach(el => el.textContent = counts[el.dataset.count] || '');
+    $$('#outreach-tabs .tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.filter === state.filter)));
+    $('#nav-pending').textContent = counts.pending; $('#nav-pending').classList.toggle('hidden', !counts.pending);
+
+    const list = filtered();
+    if (!list.some(o => o.id === state.selectedOutreach)) state.selectedOutreach = list[0]?.id ?? null;
+
+    const statusDot = { pending: '#F2B544', approved: '#5CD3A0', rejected: '#646D88' };
+    $('#outreach-list').innerHTML = list.length ? list.map(o => `
+      <li><button data-oid="${o.id}" class="w-full text-left px-3 py-3 rounded-xl flex gap-3 items-start ${o.id === state.selectedOutreach ? 'bg-ink-700' : 'hover:bg-ink-700/50'}">
+        <span class="mt-1.5 w-2 h-2 rounded-full shrink-0" style="background:${statusDot[o.status]}"></span>
+        <span class="min-w-0 flex-1"><span class="block font-medium truncate">${esc(o.community_name)}</span>
+        <span class="block text-xs text-fog-400 mt-0.5">${esc(o.language_name)}, ${esc(PLATFORM[o.platform] || o.platform)}${o.status === 'approved' ? `, ${fmt(o.clicks)} clicks` : ''}</span></span>
+        <span class="font-display text-sm font-semibold num text-fog-300">${Math.round(o.score)}</span></button></li>`).join('')
+      : `<li class="p-4 text-sm text-fog-400 leading-relaxed">${state.outreach.length ? 'Nothing in this list.' : 'No messages yet. Run Radar to draft one for each matching group.'}</li>`;
+    $$('#outreach-list [data-oid]').forEach(b => b.addEventListener('click', () => { state.selectedOutreach = Number(b.dataset.oid); renderOutreach(); }));
+    renderEditor();
+  }
+
+  function renderEditor() {
+    const o = state.outreach.find(x => x.id === state.selectedOutreach);
+    const box = $('#outreach-editor');
+    if (!o) {
+      box.innerHTML = state.outreach.length
+        ? '<p class="text-fog-400">Pick a message on the left to review it.</p>'
+        : `<h2 class="font-display text-xl font-semibold">No drafts yet</h2><p class="text-fog-400 mt-2">Radar writes one message per matching group, in the language its admin reads.</p><button class="btn btn-signal mt-5" id="editor-run">Run Radar and draft messages</button>`;
+      $('#editor-run')?.addEventListener('click', () => { show('radar'); runRadar(); });
+      return;
+    }
+    const approved = o.status === 'approved';
+    const statusText = { pending: ['Waiting for your review', '#F2B544'], approved: ['Approved — link is live', '#5CD3A0'], rejected: ['Skipped', '#8A93AD'] }[o.status];
+    box.innerHTML = `
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div class="min-w-0">
+          <div class="text-sm" style="color:${statusText[1]}">${statusText[0]}</div>
+          <h2 class="font-display text-2xl font-semibold tracking-tight mt-1">${esc(o.community_name)}</h2>
+          <p class="text-sm text-fog-400 mt-1">${o.admin_name ? `For ${esc(o.admin_name)}, the admin. ` : 'For the group admin. '}${esc(o.rationale)}</p>
+        </div>
+        <label class="text-sm"><span class="sr-only">Message language</span>
+          <select id="ed-lang" class="field !w-auto !py-1.5" ${approved ? 'disabled' : ''}>
+            ${['en', 'hi', 'mr'].map(l => `<option value="${l}" ${l === o.language ? 'selected' : ''}>${{ en: 'English', hi: 'Hindi', mr: 'Marathi' }[l]}</option>`).join('')}
+          </select></label>
+      </div>
+      <label class="block mt-5"><span class="text-sm text-fog-300">Message ${o.edited ? '<span class="text-fog-500">(edited by you)</span>' : ''}</span>
+        <textarea id="ed-draft" rows="13" class="field mt-1.5 ${approved ? 'opacity-80' : ''}" ${approved ? 'readonly' : ''}>${esc(o.draft)}</textarea></label>
+      <div class="mt-4 rounded-xl border ${approved ? 'border-ok/30 bg-ok/5' : 'border-ink-600'} p-3.5 flex flex-wrap items-center gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs text-fog-400">Tracked link for this group</div>
+          <div class="font-mono text-[13px] truncate mt-0.5 ${approved ? 'text-fog' : 'text-fog-500'}">${esc(o.link)}</div>
+        </div>
+        ${approved
+          ? `<button class="btn btn-ghost" id="ed-copy-link">Copy link</button><button class="btn btn-ghost" id="ed-copy-msg">Copy message</button>`
+          : `<span class="text-xs text-fog-500">Unlocks after approval</span>`}
+      </div>
+      <div class="mt-5 flex flex-wrap gap-2 justify-end">
+        ${approved
+          ? `<span class="mr-auto self-center text-sm text-fog-400">${fmt(o.clicks)} clicks so far</span><button class="btn btn-quiet" id="ed-reset">Move back to review</button>`
+          : `${o.status === 'rejected' ? '<button class="btn btn-quiet" id="ed-reset">Move back to review</button>' : '<button class="btn btn-danger" id="ed-reject">Skip this group</button>'}
+             <button class="btn btn-ghost" id="ed-save" disabled>Save edits</button>
+             <button class="btn btn-signal" id="ed-approve">Approve message</button>`}
+      </div>`;
+
+    const ta = $('#ed-draft');
+    ta.addEventListener('input', () => { const s = $('#ed-save'); if (s) s.disabled = ta.value.trim() === o.draft.trim(); });
+    $('#ed-lang')?.addEventListener('change', async (e) => {
+      if (o.edited && !confirm('Switching language rewrites the message and discards your edits. Continue?')) { e.target.value = o.language; return; }
+      try { replaceOutreach(await api(`/api/outreach/${o.id}`, { method: 'PATCH', body: { language: e.target.value } })); toast('Message rewritten'); } catch (err) { fail(err); }
+    });
+    $('#ed-save')?.addEventListener('click', () => saveDraft(o));
+    $('#ed-approve')?.addEventListener('click', async (e) => {
+      busy(e.currentTarget, true, 'Approving…');
+      try {
+        if (ta.value.trim() !== o.draft.trim()) await saveDraft(o, true);
+        replaceOutreach(await api(`/api/outreach/${o.id}/approve`, { method: 'POST' }));
+        toast('Approved. Copy the message and send it to the admin yourself.');
+      } catch (err) { fail(err); busy(e.currentTarget, false); }
+    });
+    $('#ed-reject')?.addEventListener('click', async () => { try { replaceOutreach(await api(`/api/outreach/${o.id}/reject`, { method: 'POST' })); toast('Skipped', 'info'); } catch (err) { fail(err); } });
+    $('#ed-reset')?.addEventListener('click', async () => { try { replaceOutreach(await api(`/api/outreach/${o.id}/reset`, { method: 'POST' })); toast('Moved back to review', 'info'); } catch (err) { fail(err); } });
+    $('#ed-copy-link')?.addEventListener('click', () => copy(o.link, 'Link'));
+    $('#ed-copy-msg')?.addEventListener('click', () => copy(o.draft, 'Message'));
+  }
+
+  async function saveDraft(o, silent) {
+    const text = $('#ed-draft').value.trim();
+    if (text.length < 10) { toast('The message needs at least a sentence.', 'error'); throw new Error('Message too short'); }
+    const updated = await api(`/api/outreach/${o.id}`, { method: 'PATCH', body: { draft: text } });
+    replaceOutreach(updated, true);
+    if (!silent) toast('Edits saved');
+    return updated;
+  }
+
+  function replaceOutreach(updated, keepFilter) {
+    state.outreach = state.outreach.map(o => o.id === updated.id ? updated : o);
+    if (!keepFilter && state.filter !== 'all' && updated.status !== state.filter) {
+      // Stay on the same item when its status changes: follow it into its new list.
+      state.filter = updated.status;
+    }
+    state.selectedOutreach = updated.id;
+    renderOutreach();
+  }
+
+  // ---------------------------------------------------------------- squads
+  async function loadTeams() {
+    state.teams = await api(`/api/events/${state.eventId}/teams`);
+    if (state.view === 'squads') renderTeams();
+  }
+
+  function renderSquadSummary() {
+    if (!state.stats) return;
+    const k = state.stats.kpis;
+    const item = (n, l, c) => `<div><span class="font-display text-2xl font-semibold num" style="color:${c}">${n}</span> <span class="text-fog-400">${l}</span></div>`;
+    $('#squad-summary').innerHTML = [
+      item(fmt(k.teams), 'squads', '#E7EAF3'),
+      item(fmt(k.full_teams), 'complete', '#5CD3A0'),
+      item(fmt(k.open_seats), 'open seats', '#93A4FF'),
+      item(fmt(k.via_referral), 'joined through a teammate', '#F2B544'),
+    ].join('');
+  }
+
+  function teamCardText(t) {
+    const lines = [`Team ${t.number} · ${t.filled}/${t.size} filled`];
+    ROLES.forEach(r => {
+      const ms = t.members.filter(m => m.role === r.id);
+      if (ms.length) ms.forEach(m => lines.push(`✅ ${r.label} — ${m.first_name}`));
+      else if (!t.is_full) lines.push(`⬜ ${r.label} — open seat`);
+    });
+    lines.push('', t.is_full ? 'Squad complete' : `Looking for: ${t.missing_role_labels.join(', ')}`);
+    lines.push(`Event: ${t.event_name}`);
+    return lines.join('\n');
+  }
+
+  function renderTeams() {
+    const box = $('#teams');
+    if (!state.teams.length) {
+      box.innerHTML = `<div class="panel p-8 sm:col-span-2 xl:col-span-3"><h2 class="font-display text-xl font-semibold">No squads yet</h2>
+        <p class="text-fog-400 mt-2 max-w-lg leading-relaxed">Squads form as people register through the Telegram bot. To see the balancer work before launch, approve a message in Outreach, then simulate sample sign-ups.</p></div>`;
+      return;
+    }
+    box.innerHTML = state.teams.map(t => {
+      const byRole = {};
+      t.members.forEach(m => (byRole[m.role] ||= []).push(m));
+      const slots = [];
+      ROLES.forEach(r => (byRole[r.id] || []).forEach(m => slots.push({ r, m })));
+      ROLES.forEach(r => { if (!byRole[r.id] && slots.length < t.size) slots.push({ r, m: null }); });
+      while (slots.length < t.size) slots.push({ r: null, m: null });
+      const progress = t.filled / t.size;
+      const ring = 2 * Math.PI * 15;
+      return `<article class="panel p-5 flex flex-col" aria-label="Team ${t.number}">
+        <header class="flex items-center justify-between gap-3">
+          <div><h3 class="font-display text-xl font-semibold">Team ${t.number}</h3>
+            <div class="text-sm ${t.is_full ? 'text-ok' : 'text-fog-400'}">${t.is_full ? 'Complete' : `Looking for ${esc(t.missing_role_labels.map(x => x.toLowerCase()).join(', '))}`}</div></div>
+          <svg width="40" height="40" viewBox="0 0 40 40" aria-label="${t.filled} of ${t.size} seats filled"><circle cx="20" cy="20" r="15" fill="none" stroke="#24304A" stroke-width="4"/>
+            <circle cx="20" cy="20" r="15" fill="none" stroke="${t.is_full ? '#5CD3A0' : '#93A4FF'}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${ring * progress} ${ring}" transform="rotate(-90 20 20)"/>
+            <text x="20" y="24" text-anchor="middle" font-size="11" font-weight="600" fill="#E7EAF3" font-family="Instrument Sans">${t.filled}/${t.size}</text></svg>
+        </header>
+        <ul class="grid grid-cols-2 gap-2 mt-4">${slots.map(({ r, m }) => m
+          ? `<li class="rounded-xl p-3" style="background:${r.color}14;border:1px solid ${r.color}33">
+              <div class="text-xs" style="color:${r.color}">${r.label}</div>
+              <div class="font-medium mt-0.5 truncate">${esc(m.first_name)}${m.confirmed ? ' <span class="text-ok text-xs" title="Confirmed attendance">✓</span>' : ''}</div></li>`
+          : `<li class="rounded-xl p-3 border border-dashed border-ink-500">
+              <div class="text-xs text-fog-500">${r ? r.label : 'Any role'}</div><div class="text-fog-500 mt-0.5">Open seat</div></li>`).join('')}</ul>
+        <div class="mt-4 pt-3 border-t border-ink-600/60 flex items-center justify-between text-xs text-fog-400">
+          <span>${t.confirmed} of ${t.filled} confirmed</span>
+          <button class="btn btn-quiet !px-2 !py-1 !text-xs" data-copy-team="${t.team_id}">Copy card</button></div>
+      </article>`;
+    }).join('');
+    $$('[data-copy-team]').forEach(b => b.addEventListener('click', () => {
+      const t = state.teams.find(x => x.team_id === Number(b.dataset.copyTeam)); if (t) copy(teamCardText(t), 'Team card');
+    }));
+  }
+
+  async function simulate(btn) {
+    busy(btn, true, 'Simulating…');
+    try {
+      const r = await api(`/api/events/${state.eventId}/simulate`, { method: 'POST', body: { count: 12 } });
+      toast(`${r.created} sample sign-ups added. They're marked as synthetic in the data.`, 'info');
+      await Promise.all([loadTeams(), loadStats(true)]);
+    } catch (e) { fail(e); } finally { busy(btn, false); }
+  }
+
+  // ---------------------------------------------------------------- dialogs
+  function openDialog(id) { const d = $(id); d.showModal(); d.querySelector('input,select,textarea')?.focus(); }
+  $$('dialog [data-close]').forEach(b => b.addEventListener('click', () => b.closest('dialog').close()));
+  $$('dialog').forEach(d => d.addEventListener('click', e => { if (e.target === d) d.close(); }));
+
+  $('#tag-picker').innerHTML = THEMES.map(([id, label]) => `
+    <label class="cursor-pointer"><input type="checkbox" name="tag" value="${id}" class="peer sr-only" />
+      <span class="chip peer-checked:!border-signal peer-checked:!text-signal peer-checked:bg-signal/10 peer-focus-visible:ring-2 peer-focus-visible:ring-squad">${label}</span></label>`).join('');
+
+  $('#walkin-roles').innerHTML = ROLES.map((r, i) => `
+    <label class="cursor-pointer"><input type="radio" name="role" value="${r.id}" class="role-opt sr-only" ${i === 0 ? 'checked' : ''} />
+      <span class="block rounded-xl border border-ink-600 px-3 py-2 text-sm" style="--c:${r.color}">${r.label}</span></label>`).join('');
+
+  $('#form-event').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const tags = [...f.getAll('tag'), ...String(f.get('extra_tags') || '').split(',').map(s => s.trim()).filter(Boolean)];
+    const body = { name: f.get('name'), city: f.get('city'), description: f.get('description') || '', venue: f.get('venue') || '', tags, start_date: f.get('start_date') || null };
+    const btn = $('#btn-create-event');
+    busy(btn, true, 'Creating…');
+    try {
+      const ev = await api('/api/events', { method: 'POST', body });
+      $('#dlg-event').close(); e.target.reset();
+      state.view = 'radar';
+      await loadEvents(ev.id);
+      await runRadar();
+    } catch (err) { fail(err); } finally { busy(btn, false); }
+  });
+
+  $('#form-community').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const languages = f.getAll('lang'); if (!languages.length) languages.push('en');
+    const body = { name: f.get('name'), city: f.get('city'), platform: f.get('platform'), size: Number(f.get('size') || 100),
+      admin_name: f.get('admin_name') || '', tags: String(f.get('tags') || '').split(',').map(s => s.trim()).filter(Boolean), languages };
+    try {
+      await api('/api/communities', { method: 'POST', body });
+      $('#dlg-community').close(); e.target.reset();
+      toast(`${body.name} added to the directory. Run Radar again to rank it.`);
+      await loadRanking();
+    } catch (err) { fail(err); }
+  });
+
+  $('#form-walkin').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+      const p = await api('/api/register', { method: 'POST', body: { event_id: state.eventId, name: f.get('name'), role: f.get('role'), experience: f.get('experience') } });
+      $('#dlg-walkin').close(); e.target.reset();
+      toast(`${p.name} seated in Team ${p.team_number}.`);
+      await Promise.all([loadTeams(), loadStats(true)]);
+    } catch (err) { fail(err); }
+  });
+
+  // ---------------------------------------------------------------- wiring
+  $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+  $('#event-select').addEventListener('change', e => selectEvent(e.target.value).catch(fail));
+  $('#btn-new-event').addEventListener('click', () => openDialog('#dlg-event'));
+  document.addEventListener('click', e => { if (e.target.closest('[data-open-new-event]')) openDialog('#dlg-event'); });
+  $('#btn-run-radar').addEventListener('click', runRadar);
+  $('#btn-add-community').addEventListener('click', () => openDialog('#dlg-community'));
+  $('#btn-simulate').addEventListener('click', e => simulate(e.currentTarget));
+  $('#btn-walkin').addEventListener('click', () => openDialog('#dlg-walkin'));
+  $$('#outreach-tabs .tab').forEach(t => t.addEventListener('click', () => { state.filter = t.dataset.filter; state.selectedOutreach = null; renderOutreach(); }));
+
+  const apiInput = $('#api-base');
+  apiInput.value = API;
+  apiInput.addEventListener('change', () => {
+    API = apiInput.value.trim().replace(/\/$/, '') || defaultApi;
+    store.set('radar.api', API);
+    boot();
+  });
+
+  setInterval(() => {
+    if (document.hidden || !state.eventId || !state.online) return;
+    if (state.view === 'overview') loadStats(true).catch(() => {});
+    if (state.view === 'squads') Promise.all([loadTeams(), loadStats(true)]).catch(() => {});
+  }, POLL_MS);
+
+  async function boot() {
+    try { await api('/api/health'); await loadEvents(); }
+    catch (e) {
+      fail(e);
+      $('#view-empty').innerHTML = `<div class="panel p-10 max-w-xl"><h1 class="font-display text-3xl font-semibold tracking-tight">Can't reach the API</h1>
+        <p class="mt-3 text-fog-300 leading-relaxed">The dashboard is looking for it at <span class="font-mono text-sm">${esc(API)}</span>. Start the backend with <span class="font-mono text-sm">uvicorn app.main:app --reload</span>, or change the address in the sidebar.</p>
+        <button class="btn btn-ghost mt-6" onclick="location.reload()">Try again</button></div>`;
+      $$('section[id^="view-"]').forEach(s => s.classList.toggle('hidden', s.id !== 'view-empty'));
+    }
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
